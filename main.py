@@ -32,14 +32,6 @@ AREA_COLORS = {
 }
 
 
-def compute_top10_share(city: City) -> float:
-    """Return the share of all listings owned by the top 10% of hosts."""
-    num_hosts = len(city.hosts)
-    top_k = max(1, int(0.10 * num_hosts))
-    asset_counts = sorted((len(h.assets) for h in city.hosts), reverse=True)
-    return sum(asset_counts[:top_k]) / len(city.places)
-
-
 def compute_host_wealth(city: City) -> list[dict]:
     """Calculate total wealth (cash profits + latest price of owned places) per host."""
     wealth_records = []
@@ -62,25 +54,22 @@ def compute_host_wealth(city: City) -> list[dict]:
     return wealth_records
 
 
-def run_simulation(seed: int, priority_small_hosts: bool = False) -> tuple[City, list[float], int]:
+def run_simulation(seed: int) -> tuple[City, list[dict], int]:
     """Initialize and run the city simulation for NUM_MONTHS steps."""
     random.seed(seed)
-    city = City(
-        size=CITY_SIZE,
-        area_rates=AREA_RATES,
-        priority_small_hosts=priority_small_hosts,
-    )
+    city = City(size=CITY_SIZE, area_rates=AREA_RATES)
     city.initialize()
 
-    top10_history = [compute_top10_share(city)]
+    # Places owned by hosts from each area of origin, recorded every month.
+    ownership_history = [city.places_owned_by_area()]
     total_transactions = 0
 
     for _ in range(NUM_MONTHS):
         transactions = city.iterate()
         total_transactions += len(transactions)
-        top10_history.append(compute_top10_share(city))
+        ownership_history.append(city.places_owned_by_area())
 
-    return city, top10_history, total_transactions
+    return city, ownership_history, total_transactions
 
 
 def plot_graph1_wealth(wealth_records: list[dict], output_path: Path) -> None:
@@ -110,29 +99,43 @@ def plot_graph1_wealth(wealth_records: list[dict], output_path: Path) -> None:
     plt.close(fig)
 
 
-def plot_graph2_concentration(
-    top10_history: list[float],
+def plot_graph2_ownership(
+    ownership_history: list[dict],
+    hosts_without_places: int,
     title: str,
-    subtitle: str,
     output_path: Path,
-    color: str = "#2B5C8F",
 ) -> None:
-    """Save time-series chart of the share of listings owned by the top 10% of hosts."""
-    months = range(len(top10_history))
-    percentages = [share * 100 for share in top10_history]
+    """Save line chart of places owned by hosts from each area of origin over time."""
+    months = range(len(ownership_history))
+    n_places = sum(ownership_history[0].values())
 
-    fig, ax = plt.subplots(figsize=(10, 5.5))
-    ax.plot(months, percentages, color=color, linewidth=2.2, label="Top 10% Hosts Ownership Share")
-    ax.axhline(10.0, color="gray", linestyle=":", linewidth=1.2, label="Equal Distribution Baseline (10%)")
+    fig, ax = plt.subplots(figsize=(11, 6.5))
 
-    ax.set_title(title, fontsize=13, fontweight="bold", pad=22)
-    plt.suptitle(subtitle, fontsize=9.5, color="#444444", y=0.93)
+    for area in sorted(AREA_LABELS.keys()):
+        values = [month[area] for month in ownership_history]
+        ax.plot(months, values, color=AREA_COLORS[area], linewidth=2, label=AREA_LABELS[area])
+        # Label each line at its end so the chart does not rely on colour alone
+        ax.annotate(f"Area {area}: {values[-1]}", xy=(months[-1], values[-1]),
+                    xytext=(6, 0), textcoords="offset points", va="center", fontsize=10)
+
+    ax.set_title(title, loc="left", fontsize=13, fontweight="bold", pad=28)
+    ax.text(0, 1.02,
+            f"Each area starts with 25 of the {n_places} places. "
+            f"By month {NUM_MONTHS}, {hosts_without_places} of {n_places} hosts own no property.",
+            transform=ax.transAxes, fontsize=9.5, color="#444444")
+
     ax.set_xlabel("Simulation Month (0–180)")
-    ax.set_ylabel("Share of Total Listings Owned by Top 10% (%)")
+    ax.set_ylabel(f"Places Owned (of {n_places})")
     ax.set_xlim(0, NUM_MONTHS)
-    ax.set_ylim(0, max(25, max(percentages) + 5))
-    ax.legend(loc="upper left")
-    ax.grid(True, linestyle="--", alpha=0.4)
+    ax.set_xticks(range(0, NUM_MONTHS + 1, 12))
+    # Fixed y-range so graph2_v0 and graph2_v1 can be compared directly
+    highest = max(max(month.values()) for month in ownership_history)
+    ax.set_ylim(10, max(40, highest + 2))
+    ax.legend(title="Host's Area of Origin", loc="upper center", bbox_to_anchor=(0.5, -0.12),
+              ncol=4, fontsize=8.5, title_fontsize=9, frameon=False)
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=300)
@@ -143,32 +146,20 @@ def main() -> None:
     reports_dir = Path("reports")
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Run baseline simulation (v0: sort by spread descending)
-    city_v0, top10_v0, tx_v0 = run_simulation(seed=SEED, priority_small_hosts=False)
-    wealth_v0 = compute_host_wealth(city_v0)
+    # Runs whichever rule is active in the code (the original rule, v0).
+    city, ownership_history, total_transactions = run_simulation(seed=SEED)
 
-    plot_graph1_wealth(wealth_v0, reports_dir / "graph1.png")
-    plot_graph2_concentration(
-        top10_history=top10_v0,
-        title="Market Concentration Over Time — Baseline Rule (v0)",
-        subtitle="Share of 100 listings held by the top 10 hosts (bids sorted by spread descending)",
+    plot_graph1_wealth(compute_host_wealth(city), reports_dir / "graph1.png")
+    plot_graph2_ownership(
+        ownership_history=ownership_history,
+        hosts_without_places=city.hosts_without_places(),
+        title="Who Owns the City? Places Owned by Hosts From Each Area of Origin",
         output_path=reports_dir / "graph2_v0.png",
-        color="#2B5C8F",
     )
 
-    # 2. Run modified simulation (v1: prioritize hosts with fewer properties)
-    city_v1, top10_v1, tx_v1 = run_simulation(seed=SEED, priority_small_hosts=True)
-    plot_graph2_concentration(
-        top10_history=top10_v1,
-        title="Market Concentration Over Time — Small-Host Priority Rule (v1)",
-        subtitle="Share of 100 listings held by the top 10 hosts (bids sorted by assets ascending, then spread descending)",
-        output_path=reports_dir / "graph2_v1.png",
-        color="#D95F02",
-    )
-
-    # Diagnostics for Phase 2 check
-    print(f"Baseline (v0): {tx_v0} total trades | Final Top-10% Share: {top10_v0[-1]:.1%}")
-    print(f"Modified (v1): {tx_v1} total trades | Final Top-10% Share: {top10_v1[-1]:.1%}")
+    print(f"{total_transactions} total trades | "
+          f"places owned by area: {ownership_history[-1]} | "
+          f"hosts with no property: {city.hosts_without_places()}")
 
 
 if __name__ == "__main__":
