@@ -17,7 +17,15 @@ class Host:
         """Return bids for neighbouring properties the host can afford."""
         opportunities = set()
 
-        for place_id in self.assets:
+        # Original rule (v0): only look next to places the host owns now.
+        # A host that has sold everything has no neighbours and can never bid.
+        search_from = self.assets
+
+        # Modified rule (v1): a host that has sold everything can still
+        # bid on places next to the last place it owned.
+        # search_from = self.assets if self.assets else {self.last_place}
+
+        for place_id in search_from:
             place = self.city.places[place_id]
             for neighbour_id in place.neighbours:
                 if neighbour_id not in self.assets:
