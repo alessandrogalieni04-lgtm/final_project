@@ -50,3 +50,19 @@ environment.yml
 pyproject.toml
 main.py
 README.md
+```
+
+## How to run
+
+```bash
+conda env create -f environment.yml
+conda activate final_project_env
+pip install -e .
+python main.py
+```
+
+`python main.py` runs the simulation with the original rule and saves `reports/graph1.png` and `reports/graph2_v0.png`.
+
+**Rule change:** the modified rule is the commented `search_from` line in `Host.make_bids` (`src/final_project/host.py`): a host that has sold every property can still bid on places next to the last one it owned. `reports/graph2_v1.png` was produced by switching that line on and running `main.py`.
+
+**Part 2:** download both datasets into `data/` with the names above, then run `notebooks/part2.ipynb` from top to bottom. It saves `reports/graph3.png`.
