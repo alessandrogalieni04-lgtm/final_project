@@ -67,6 +67,9 @@ class City:
 
             # Ownership moves from seller to buyer.
             seller.assets.remove(place.place_id)
+            # Remembered for the modified rule in Host.make_bids (v1).
+            # It changes nothing under the original rule.
+            seller.last_place = place.place_id
             buyer.assets.add(place.place_id)
             place.host_id = buyer.host_id
 
